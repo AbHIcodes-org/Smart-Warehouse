@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AMR Network & Map Simulation</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #f4f7f6; font-family: 'Segoe UI', sans-serif; }
+        canvas { display: block; }
+        #controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+            width: 320px;
+            z-index: 10;
+        }
+        h2 { margin-top: 0; font-size: 1.3rem; color: #2c3e50; border-bottom: 2px solid #ecf0f1; padding-bottom: 10px;}
+        .legend-item { display: flex; align-items: center; margin-bottom: 12px; font-size: 0.95rem; color: #34495e; font-weight: 500;}
+        .swatch { width: 24px; height: 24px; border-radius: 4px; margin-right: 15px; flex-shrink: 0;}
+        .swatch.wifi { background: #3498db; }
+        .swatch.wisun { background: transparent; border: 3px dashed #e67e22; }
+        .swatch.server { background: #2c3e50; border-radius: 8px;}
+        .swatch.deadzone { background: rgba(231, 76, 60, 0.15); border: 2px dashed #e74c3c; }
+        .swatch.packet-wifi { background: #3498db; border-radius: 50%; width: 14px; height: 14px; margin-left: 5px; margin-right: 20px;}
+        .swatch.packet-wisun { background: #d35400; border-radius: 50%; width: 14px; height: 14px; margin-left: 5px; margin-right: 20px;}
+        p.help-text { font-size: 0.85rem; color: #7f8c8d; line-height: 1.5; margin-top: 15px;}
+        .instruction { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); color: white; padding: 10px 20px; border-radius: 20px; font-size: 0.9rem; pointer-events: none;}
+    </style>
+</head>
+<body>
+
+    <div id="controls">
+        <h2>Network Topology</h2>
+        <div class="legend-item"><div class="swatch server"></div> Central Server (Wi-Fi AP)</div>
+        <div class="legend-item"><div class="swatch wifi"></div> Wi-Fi Connection</div>
+        <div class="legend-item"><div class="swatch wisun"></div> Wi-SUN Mesh (Hopping)</div>
+        <div class="legend-item"><div class="swatch deadzone"></div> Wi-Fi Deadzone<br><small style="margin-left:5px; font-weight:normal; color:#7f8c8d;">(Drag to move)</small></div>
+        <div style="border-top: 1px solid #ecf0f1; margin: 15px 0;"></div>
+        <div class="legend-item"><div class="swatch packet-wifi"></div> Wi-Fi Message</div>
+        <div class="legend-item"><div class="swatch packet-wisun"></div> Wi-SUN Message</div>
+        <p class="help-text">AMRs entering the Deadzone lose Wi-Fi connection and automatically form a Wi-SUN mesh network. Messages are forwarded (hopped) through AMRs acting as bridges to reach the Central Server.</p>
+    </div>
+
+    <div class="instruction">Drag the red Deadzone box to test network failover!</div>
+
+    <canvas id="sim"></canvas>
+
+    <script>
+        const canvas = document.getElementById('sim');
+        const ctx = canvas.getContext('2d');
+        
+        let width, height;
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Environment Map config (Image 1 replica)
+        const cols = 6;
+        const colWidth = 160;
+        const startX = 120;
+        
+        const server = { x: width / 2, y: 40, w: 160, h: 50 };
+        const deadzone = { x: width / 2 - 150, y: height / 2, w: 400, h: 300, isDragging: false, offsetX: 0, offsetY: 0 };
+        
+        const amrs = [];
+        const numAMRs = 5; // Exactly 5 AMRs as requested
+        const packets = [];
+        
+        class AMR {
+            constructor(id) {
+                this.id = id;
+                this.x = Math.random() * (width - 200) + 100;
+                this.y = Math.random() * (height - 200) + 100;
+                this.targetX = this.x;
+                this.targetY = this.y;
+                this.speed = 0.8 + Math.random() * 0.6; // Moderate speed for visibility
+                
+                // Colors matching the image AMRs (Blue, Green, Orange, Red, Purple)
+                const colors = ['#3498db', '#2ecc71', '#e67e22', '#e74c3c', '#9b59b6'];
+                this.color = colors[id % colors.length];
+                
+                this.inDeadzone = false;
+                this.connectedTo = null; // object it connects to
+                this.connectionType = 'none'; // 'wifi' or 'wisun'
+                this.isBridge = false;
+                
+                this.pickTarget();
+            }
+            
+            pickTarget() {
+                // Keep targets within bounds
+                this.targetX = 100 + Math.random() * (width - 200);
+                this.targetY = 150 + Math.random() * (height - 200);
+            }
+            
+            update() {
+                let dx = this.targetX - this.x;
+                let dy = this.targetY - this.y;
+                let dist = Math.hypot(dx, dy);
+                
+                if (dist < 5) {
+                    this.pickTarget();
+                } else {
+                    this.x += (dx / dist) * this.speed;
+                    this.y += (dy / dist) * this.speed;
+                }
+                
+                // Check if in deadzone
+                this.inDeadzone = (this.x > deadzone.x && this.x < deadzone.x + deadzone.w &&
+                                   this.y > deadzone.y && this.y < deadzone.y + deadzone.h);
+            }
+            
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                
+                // Calculate angle to target for rotation
+                let angle = Math.atan2(this.targetY - this.y, this.targetX - this.x);
+                ctx.rotate(angle);
+                
+                // AMR Body (rounded rectangle)
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.roundRect(-15, -20, 30, 40, 5);
+                ctx.fill();
+                
+                // Front indicator (white triangle to show direction)
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.moveTo(5, -10);
+                ctx.lineTo(12, 0);
+                ctx.lineTo(5, 10);
+                ctx.fill();
+                
+                ctx.restore();
+                
+                // ID Label and Status (unrotated)
+                ctx.fillStyle = '#333';
+                ctx.font = 'bold 12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`AMR ${this.id + 1}`, this.x, this.y - 25);
+                
+                // Network Status icon on the AMR
+                ctx.beginPath();
+                ctx.arc(this.x + 20, this.y - 25, 6, 0, Math.PI*2);
+                if (this.connectionType === 'wifi') {
+                    ctx.fillStyle = '#3498db';
+                } else if (this.connectionType === 'wisun') {
+                    ctx.fillStyle = '#e67e22';
+                } else {
+                    ctx.fillStyle = '#e74c3c'; // Disconnected
+                }
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                
+                // Bridge label
+                if (this.isBridge) {
+                    ctx.fillStyle = '#f1c40f';
+                    ctx.font = 'bold 10px Arial';
+                    ctx.fillText('BRIDGE', this.x, this.y + 30);
+                }
+            }
+        }
+        
+        // Initialize AMRs
+        for (let i = 0; i < numAMRs; i++) {
+            amrs.push(new AMR(i));
+        }
+
+        function calculateNetwork() {
+            amrs.forEach(a => { a.connectedTo = null; a.connectionType = 'none'; a.isBridge = false; });
+            
+            let wifiNodes = [];
+            
+            // 1. Assign Wi-Fi to AMRs outside deadzone
+            amrs.forEach(a => {
+                if (!a.inDeadzone) {
+                    a.connectedTo = 'server';
+                    a.connectionType = 'wifi';
+                    wifiNodes.push(a);
+                }
+            });
+            
+            // 2. Wi-SUN Mesh logic for AMRs inside deadzone
+            amrs.forEach(a => {
+                if (a.inDeadzone) {
+                    // Find closest Wi-Fi connected AMR to act as bridge
+                    let bestBridge = null;
+                    let minDist = Infinity;
+                    wifiNodes.forEach(w => {
+                        let d = Math.hypot(a.x - w.x, a.y - w.y);
+                        if (d < minDist && d < 600) { // Max Wi-SUN range limit
+                            minDist = d;
+                            bestBridge = w;
+                        }
+                    });
+                    
+                    if (bestBridge) {
+                        a.connectedTo = bestBridge;
+                        a.connectionType = 'wisun';
+                        bestBridge.isBridge = true;
+                    } else {
+                        // Multi-hop: find another Wi-SUN node already connected to the mesh
+                        let bestHop = null;
+                        let minHopDist = Infinity;
+                        amrs.forEach(other => {
+                            if (other !== a && other.inDeadzone && other.connectionType === 'wisun') {
+                                let d = Math.hypot(a.x - other.x, a.y - other.y);
+                                if (d < minHopDist && d < 300) {
+                                    minHopDist = d;
+                                    bestHop = other;
+                                }
+                            }
+                        });
+                        if (bestHop) {
+                            a.connectedTo = bestHop;
+                            a.connectionType = 'wisun';
+                        }
+                    }
+                }
+            });
+        }
+        
+        function drawMap() {
+            // Background Grid (Depicting warehouse floor)
+            ctx.strokeStyle = 'rgba(189, 195, 199, 0.3)';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < width; i += 40) {
+                ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, height); ctx.stroke();
+            }
+            for (let i = 0; i < height; i += 40) {
+                ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(width, i); ctx.stroke();
+            }
+            
+            // Central Server 
+            ctx.fillStyle = '#2c3e50';
+            ctx.beginPath();
+            ctx.roundRect(server.x - server.w/2, server.y - server.h/2, server.w, server.h, 10);
+            ctx.fill();
+            ctx.fillStyle = '#ecf0f1';
+            ctx.font = 'bold 16px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('CENTRAL LIVE TASK SERVER', server.x, server.y + 6);
+            
+            // Charging Stations (C1 - C6) at top
+            for (let i = 0; i < 6; i++) {
+                let x = startX + i * colWidth;
+                let y = 130;
+                
+                // Orange glow
+                let grad = ctx.createRadialGradient(x, y, 10, x, y, 25);
+                grad.addColorStop(0, 'rgba(230, 126, 34, 0.5)');
+                grad.addColorStop(1, 'rgba(230, 126, 34, 0)');
+                ctx.fillStyle = grad;
+                ctx.beginPath(); ctx.arc(x, y, 25, 0, Math.PI*2); ctx.fill();
+                
+                ctx.fillStyle = '#d35400';
+                ctx.beginPath(); ctx.arc(x, y, 16, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 12px Arial';
+                ctx.fillText('⚡', x, y+4);
+                ctx.fillStyle = '#333';
+                ctx.fillText(`C${i+1}`, x, y + 40);
+            }
+            
+            // Racks layout (from first image)
+            ctx.fillStyle = '#ecf0f1';
+            ctx.strokeStyle = '#bdc3c7';
+            ctx.lineWidth = 2;
+            
+            const drawRack = (x, y) => {
+                const w = 70; const h = 120;
+                ctx.beginPath();
+                ctx.rect(x - w/2, y - h/2, w, h);
+                ctx.fill();
+                ctx.stroke();
+                
+                // Grid pattern inside rack
+                ctx.beginPath();
+                for(let i=1; i<3; i++) { ctx.moveTo(x - w/2 + i*23.3, y - h/2); ctx.lineTo(x - w/2 + i*23.3, y + h/2); }
+                for(let i=1; i<5; i++) { ctx.moveTo(x - w/2, y - h/2 + i*24); ctx.lineTo(x + w/2, y - h/2 + i*24); }
+                ctx.stroke();
+                
+                // BAY zones (dashed blue on sides)
+                ctx.strokeStyle = '#3498db';
+                ctx.setLineDash([4, 4]);
+                ctx.strokeRect(x - w/2 - 18, y - 10, 18, 20);
+                ctx.strokeRect(x + w/2, y - 10, 18, 20);
+                ctx.setLineDash([]);
+                
+                ctx.fillStyle = '#3498db';
+                ctx.font = '9px Arial';
+                ctx.fillText('BAY', x - w/2 - 9, y + 3);
+                ctx.fillText('BAY', x + w/2 + 9, y + 3);
+                ctx.strokeStyle = '#bdc3c7'; // Reset stroke
+            };
+            
+            for (let row = 0; row < 2; row++) {
+                for (let col = 0; col < 6; col++) {
+                    if (col === 2 || col === 5) continue; // Skip to create aisles similar to image
+                    drawRack(startX + col * colWidth, 300 + row * 220);
+                }
+            }
+            
+            // Parking Spots (P1, P2, P3, P4)
+            const drawPark = (x, y, label) => {
+                ctx.fillStyle = 'rgba(52, 152, 219, 0.2)';
+                ctx.beginPath(); ctx.arc(x, y, 22, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#3498db';
+                ctx.beginPath(); ctx.arc(x, y, 15, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.fillText('P', x, y+4);
+                ctx.fillStyle = '#333'; ctx.fillText(label, x, y+35);
+            };
+            drawPark(startX + 1 * colWidth + colWidth/2, 280, 'P1');
+            drawPark(startX + 3 * colWidth + colWidth/2, 280, 'P3');
+            drawPark(startX + 1 * colWidth + colWidth/2, 500, 'P2');
+            drawPark(startX + 3 * colWidth + colWidth/2, 500, 'P4');
+            
+            // Drop zone D1
+            ctx.fillStyle = 'rgba(46, 204, 113, 0.2)';
+            ctx.beginPath(); ctx.arc(60, height - 80, 25, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#2ecc71';
+            ctx.beginPath(); ctx.arc(60, height - 80, 16, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.font = 'bold 14px Arial'; ctx.fillText('D', 60, height - 75);
+            ctx.fillStyle = '#333'; ctx.fillText('D1', 60, height - 40);
+        }
+        
+        function drawDeadzone() {
+            ctx.fillStyle = 'rgba(231, 76, 60, 0.15)';
+            ctx.fillRect(deadzone.x, deadzone.y, deadzone.w, deadzone.h);
+            
+            ctx.strokeStyle = '#e74c3c';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([10, 10]);
+            ctx.strokeRect(deadzone.x, deadzone.y, deadzone.w, deadzone.h);
+            ctx.setLineDash([]);
+            
+            ctx.fillStyle = '#c0392b';
+            ctx.font = 'bold 18px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('⚠️ WI-FI DEADZONE', deadzone.x + deadzone.w/2, deadzone.y + 35);
+            ctx.font = '13px Arial';
+            ctx.fillText('Force Wi-SUN Mesh Routing', deadzone.x + deadzone.w/2, deadzone.y + 55);
+        }
+        
+        function spawnPacket(src, dest, type) {
+            let targetObj = dest === 'server' ? {x: server.x, y: server.y + server.h/2} : dest;
+            packets.push({
+                x: src.x, y: src.y,
+                startX: src.x, startY: src.y,
+                target: targetObj,
+                progress: 0,
+                speed: 0.015 + Math.random() * 0.01,
+                type: type,
+                id: Math.random()
+            });
+        }
+        
+        function updateNetworkVisuals() {
+            // Draw lines for active connections
+            amrs.forEach(a => {
+                if (a.connectedTo) {
+                    let targetObj = a.connectedTo === 'server' ? {x: server.x, y: server.y + server.h/2} : a.connectedTo;
+                    ctx.beginPath();
+                    ctx.moveTo(a.x, a.y);
+                    ctx.lineTo(targetObj.x, targetObj.y);
+                    
+                    if (a.connectionType === 'wifi') {
+                        ctx.strokeStyle = 'rgba(52, 152, 219, 0.5)';
+                        ctx.lineWidth = 3;
+                        ctx.stroke();
+                    } else if (a.connectionType === 'wisun') {
+                        ctx.strokeStyle = 'rgba(230, 126, 34, 0.8)';
+                        ctx.lineWidth = 2;
+                        ctx.setLineDash([6, 6]);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                    }
+                    
+                    // Periodically emit packets to visualize data routing and hopping
+                    if (Math.random() < 0.012) {
+                        spawnPacket(a, a.connectedTo, a.connectionType);
+                        
+                        // **CRITICAL FEATURE: Visualize Hopping**
+                        // If sending to a bridge, schedule the bridge to forward it to the server
+                        if (a.connectionType === 'wisun' && a.connectedTo !== 'server') {
+                            let bridge = a.connectedTo;
+                            // Wait for packet to arrive (approx based on speed), then forward
+                            setTimeout(() => {
+                                if (bridge && bridge.connectedTo) {
+                                    spawnPacket(bridge, bridge.connectedTo, bridge.connectionType);
+                                }
+                            }, 1200); 
+                        }
+                    }
+                }
+            });
+            
+            // Animate and draw packets
+            for (let i = packets.length - 1; i >= 0; i--) {
+                let p = packets[i];
+                p.progress += p.speed;
+                if (p.progress >= 1) {
+                    packets.splice(i, 1);
+                    continue;
+                }
+                
+                p.x = p.startX + (p.target.x - p.startX) * p.progress;
+                p.y = p.startY + (p.target.y - p.startY) * p.progress;
+                
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 6, 0, Math.PI*2);
+                ctx.fillStyle = p.type === 'wifi' ? '#3498db' : '#d35400';
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                
+                // Glowing trail effect
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 12, 0, Math.PI*2);
+                ctx.fillStyle = p.type === 'wifi' ? 'rgba(52, 152, 219, 0.3)' : 'rgba(211, 84, 0, 0.3)';
+                ctx.fill();
+            }
+        }
+
+        function loop() {
+            ctx.clearRect(0, 0, width, height);
+            
+            drawMap();
+            drawDeadzone();
+            
+            amrs.forEach(a => a.update());
+            calculateNetwork();
+            
+            updateNetworkVisuals();
+            
+            amrs.forEach(a => a.draw());
+            
+            requestAnimationFrame(loop);
+        }
+        
+        loop();
+
+        // Interactive Dragging Logic for the Deadzone
+        canvas.addEventListener('mousedown', e => {
+            if (e.button !== 0) return; // Only left click
+            let mx = e.clientX, my = e.clientY;
+            // Check if click is inside the deadzone rectangle
+            if (mx > deadzone.x && mx < deadzone.x + deadzone.w &&
+                my > deadzone.y && my < deadzone.y + deadzone.h) {
+                deadzone.isDragging = true;
+                deadzone.offsetX = mx - deadzone.x;
+                deadzone.offsetY = my - deadzone.y;
+            }
+        });
+        canvas.addEventListener('mousemove', e => {
+            if (deadzone.isDragging) {
+                deadzone.x = e.clientX - deadzone.offsetX;
+                deadzone.y = e.clientY - deadzone.offsetY;
+            }
+        });
+        window.addEventListener('mouseup', () => {
+            deadzone.isDragging = false;
+        });
+
+    </script>
+</body>
+</html>
+

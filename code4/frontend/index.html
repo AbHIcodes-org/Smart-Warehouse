@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AMR Network Simulation</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .legend span {
+            display: inline-block;
+            margin-right: 15px;
+            font-size: 0.9em;
+        }
+        .legend .box {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            margin-right: 5px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Smart Warehouse / Multi-AMR Communication Simulation</h1>
+    </header>
+    
+    <div class="container">
+        <div class="left-column">
+            <h2>Live Warehouse</h2>
+            <div id="warehouse-container" style="position: relative;">
+                <canvas id="warehouseCanvas" width="600" height="600"></canvas>
+            </div>
+            
+            <div class="legend panel" style="margin-top: 10px;">
+                <h3>Legend</h3>
+                <div>
+                    <span><div class="box" style="background: rgba(74, 222, 128, 0.4);"></div> Wi-Fi Available</span>
+                    <span><div class="box" style="background: #4ade80;"></div> Wi-Fi Active Trans.</span>
+                    <span><div class="box" style="background: rgba(96, 165, 250, 0.4);"></div> Wi-SUN Available</span>
+                    <span><div class="box" style="background: #60a5fa;"></div> Wi-SUN Active Trans.</span>
+                    <span><div class="box" style="border: 1px solid #facc15;"></div> Bridge</span>
+                    <span><div class="box" style="background: rgba(255,0,0,0.2);"></div> Dead Zone</span>
+                    <span><div class="box" style="border: 1px dashed white; border-radius: 50%;"></div> Comm Radius</span>
+                    <span><div class="box" style="background: white; border-radius: 50%;"></div> Packet</span>
+                </div>
+            </div>
+
+            <div class="controls panel">
+                <h3>Dead-Zone Controls</h3>
+                <p>Drag the dead zone area on the map to move it, or use the sliders to resize.</p>
+                <label>Width:</label> <input type="range" id="dz-w" min="10" max="60" value="30">
+                <label>Height:</label> <input type="range" id="dz-h" min="10" max="60" value="30">
+            </div>
+
+            <div class="controls panel">
+                <h3>Task Input</h3>
+                <button id="btn-send-task" style="padding: 10px; font-weight: bold; background: #3b82f6; color: white; border: none; cursor: pointer;">BROADCAST NEW TASK</button>
+            </div>
+        </div>
+        
+        <div class="right-column">
+            <h2>Live Communication / Event Log</h2>
+            
+            <div class="metrics-panel panel">
+                <h3>NETWORK STATUS</h3>
+                <p>Wi-Fi AMRs: <span id="m-wifi-amrs">0</span></p>
+                <p>Dead-Zone AMRs: <span id="m-dz-amrs">0</span></p>
+                <p>Active Bridges: <span id="m-bridges">0</span></p>
+                <hr>
+                <h3>CURRENT NETWORK TOPOLOGY</h3>
+                <p>Wi-Fi Links: <span id="m-wifi-links">0</span></p>
+                <p>Wi-SUN Links: <span id="m-wisun-links">0</span></p>
+            </div>
+            
+            <div class="packet-inspector panel">
+                <h3>Packet Inspector</h3>
+                <pre id="packet-details">Click a packet event to inspect.</pre>
+            </div>
+            
+            <div class="event-log panel">
+                <h3>Event Log</h3>
+                <div id="log-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
