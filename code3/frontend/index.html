@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AMR Network Simulation</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>Smart Warehouse / Multi-AMR Communication Simulation</h1>
+    </header>
+    
+    <div class="container">
+        <div class="left-column">
+            <h2>Live Warehouse</h2>
+            <div id="warehouse-container">
+                <canvas id="warehouseCanvas" width="600" height="600"></canvas>
+            </div>
+            
+            <div class="controls panel">
+                <h3>Dead-Zone Controls</h3>
+                <select id="amr-select">
+                    <!-- populated by js -->
+                </select>
+                <button id="btn-force-dz">Force Dead Zone</button>
+                <button id="btn-restore-wifi">Restore Wi-Fi</button>
+            </div>
+
+            <div class="controls panel">
+                <h3>Task Input</h3>
+                <label>Src:</label> <input type="number" id="task-src" value="1" style="width: 40px;">
+                <label>Dst:</label> <input type="number" id="task-dst" value="5" style="width: 40px;">
+                <button id="btn-send-task">Send Task</button>
+            </div>
+        </div>
+        
+        <div class="right-column">
+            <h2>Live Communication / Event Log</h2>
+            
+            <div class="metrics-panel panel">
+                <h3>Network Metrics</h3>
+                <p>Packets Sent: <span id="m-sent">0</span></p>
+                <p>Packets Delivered: <span id="m-delivered">0</span></p>
+                <p>Duplicates Dropped: <span id="m-dups">0</span></p>
+                <p>TTL Drops: <span id="m-ttl">0</span></p>
+            </div>
+            
+            <div class="amr-details-panel panel">
+                <h3>Selected AMR Details</h3>
+                <div id="amr-details-content">
+                    Select an AMR on the map or dropdown.
+                </div>
+            </div>
+
+            <div class="packet-inspector panel">
+                <h3>Packet Inspector</h3>
+                <pre id="packet-details">Click a packet event to inspect.</pre>
+            </div>
+            
+            <div class="event-log panel">
+                <h3>Event Log</h3>
+                <div id="log-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
